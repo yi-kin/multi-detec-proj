@@ -40,8 +40,11 @@ def get_random_frame(video_path):
     return random_frame_path
 
 # 遍历第一个视频数据集
-video_dir_1 = "D:/dataset/FFIW10K-v1/FFIW10K-v1-release/target/train"
-save_path = "picture_target_train"
+# video_dir_1 = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/train_video"
+# save_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/train_pic_save"
+
+video_dir_1 = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/train_mask_vedio"
+save_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/tarin_mask_pic_save"
 
 for video_name in os.listdir(video_dir_1):
     video_path = os.path.join(video_dir_1, video_name)
