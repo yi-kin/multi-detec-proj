@@ -115,8 +115,8 @@ def main(parser_data):
     #加载数据集
     data_root = parser_data.data_path
     train_dataset = OpenForensics(data_root, "Train", data_transform["train"])
-    val_dataset = OpenForensics(data_root,dataset='Val',transform=data_transform["val"])
-    test_dataset = OpenForensics(data_root,dataset='Test-Dev',transform=data_transform["val"])
+    val_dataset = OpenForensics(data_root,dataset='Test-Dev',transform=data_transform["val"])
+    test_dataset = OpenForensics(data_root,dataset='Test-Challenge',transform=data_transform["val"])
 
     train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_size=batch_size,
@@ -548,7 +548,7 @@ if __name__ == "__main__":
     # 类别索引和类别名称对应关系
     parser.add_argument('--label-json-path', type=str, default="./test_open.json")
 
-    parser.add_argument('--epoch', type=int, default=20)
+    parser.add_argument('--epoch', type=int, default=10)
     parser.add_argument('--resume', type=bool, default=False)
     parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
                         help='learning rate (default: 0.01)')

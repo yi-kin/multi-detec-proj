@@ -2,7 +2,8 @@
 该脚本用于调用训练好的模型权重去计算验证集/测试集的COCO指标
 以及每个类别的mAP(IoU=0.5)
 """
-
+#!/usr/bin/env python
+# coding=utf-8
 import os
 import json
 
@@ -20,7 +21,7 @@ from network_files import MaskRCNN
 #from my_dataset_voc import VOCInstances
 #from train_utils import EvalCOCOMetric
 #Sbi导入的文件
-from xception import xception
+from xception_MIL import xception
 #from PIL import Image
 from torchvision.transforms import Resize
 from sklearn.metrics import confusion_matrix, roc_auc_score
@@ -29,77 +30,71 @@ from network_files import boxes as box_ops
 
 import torch.nn as nn
 import torch.nn.functional as F
-class ClassifierD(nn.Module):
-    def __init__(self, xception,input_dim=3, output_dim=2):
-        super(ClassifierD, self).__init__()
-        #########################
-        self.xcep = xception
-        #############################
-        self.linear1 = nn.Linear(4096, 128)
-        #self.batchnorm = nn.BatchNorm1d(128)
-        #self.batchnorm = nn.BatchNorm1d(128)
-        self.linear2 = nn.Linear(128, output_dim)
+from weight_loss import CrossEntropyLoss as CE
+import torch.optim as optim
 
-    def forward(self, x,y):
-        # x = x.view(-1,x.size(0))
-        x,mx = self.xcep(x)
-        diff = mx-y
-        x = torch.cat((diff, mx), dim=1)
 
-        x = self.linear1(x)
-        #x = self.batchnorm(x)
-        x = F.relu(x)
-        x = self.linear2(x)
-        return x
 
-class ClsD(nn.Module):
-    def __init__(self,xception):
-        # Instantiate the model
-        super(ClsD, self).__init__()
-        self.input_dim = 3
-        self.output_dim = 2
-        self.net = ClassifierD(xception,self.input_dim, self.output_dim)
 
-        # Define loss function and optimizer
-        self.criterion = nn.CrossEntropyLoss()
-        for name,param in self.net.xcep.named_parameters():
-            if name not in ["bn4.weight","bn4.bias","conv4.weight","conv4.bias"]:
+class AttentionLayer(nn.Module):
+    def __init__(self, dim=512):
+        super(AttentionLayer, self).__init__()
+        self.dim = dim
+        self.linear = nn.Linear(dim, 1)
+
+    def forward(self, features, W_1, b_1, flag): #feature:(4,2048)
+        if flag == 1:
+            #下面这个是共享全连接层
+            out_c = F.linear(features, W_1, b_1)
+            # out_c = self.linear(features)
+            out = out_c - out_c.max()
+            out = out.exp()
+            out = out.sum(1, keepdim=True)
+            alpha = out / out.sum(0)
+
+
+            alpha01 = features.size(0) * alpha.expand_as(features) #alpha0:(4,2048)
+            context = torch.mul(features, alpha01)
+        else:
+            context = features
+            alpha = torch.zeros(features.size(0), 1)
+
+        return context, out_c, torch.squeeze(alpha)
+
+class MIL_xcep(nn.Module):
+    def __init__(self,xcep):
+        super(MIL_xcep, self).__init__()
+        self.xception = xcep
+        self.att_layer = AttentionLayer(4096)
+        self.linear = nn.Linear(4096, 2)
+        params = {}
+        for name,param in self.xception.named_parameters():
+            if name not in ["net.bn4.weight","net.bn4.bias",'net.conv4.conv1.weight','net.conv4.pointwise.weight']:
                 param.requires_grad_(False)
-            param.requires_grad_(False)
-
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=0.0001)
-    def forward(self,x,y):
-        outputs = []
-        for i in range(len(x)):
-            output = self.net(x[i].unsqueeze(dim=0),y)
-            outputs.append(output)
-        outputs = torch.cat(outputs, dim=0)
-        return outputs
-    def train_step(self,x,target,y):
-        # outputs = []
-        outputs = self.forward(x,y)
-        # for i in range(len(x)):
-        #
-        #
-        #     output = self.forward(x[i].unsqueeze(dim=0),y)
-        #     #output = output.squeeze(dim=0)
-        #         #target_loss = target[i].reshape(-1,1)
-        #     outputs.append(output)
-        #     target_loss = target[i].reshape(-1,)
-        #     loss += self.criterion(output, target_loss)
-        # outputs = torch.cat(outputs,dim=0)
-        loss = self.criterion(outputs, target)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            params[name] = param
 
 
-        ###############
 
-        return outputs,loss
+    def forward(self, x,stander,flag=1):
+        _,mx = self.xception(x)
+        diff = mx - stander
+        feature = torch.cat((diff, mx), dim=1)
+
+        out, out_c, alpha = self.att_layer(feature, self.linear.weight, self.linear.bias, flag)
+        # m = out
+        out = out.mean(0, keepdim=True)
+        # out = torch.matmul(alpha,out).unsqueeze(dim=0)
+
+        y = self.linear(out)
+
+        return y,out_c,alpha
+
 
 
 def main(parser_data):
+    print("-----------这次是第一次将两个方法结合起来，有一个问题，在包聚合的时候，包也有diff的特征，感觉是多余的------------------")
+
+
     device = torch.device(parser_data.device if torch.cuda.is_available() else "cpu")
     print("Using {} device training.".format(device.type))
 
@@ -197,19 +192,29 @@ def main(parser_data):
     # model2.eval()
     n_epoch = args.epoch
 #############################################
-    model_cls = ClsD(model1)
+    model_cls = MIL_xcep(model1)
 
     model_cls.train()
     ############resume
-
+    resume = parser_data.resume
+    if resume:
+        wk = torch.load('4epoch.pth',map_location="cpu")
+        model_cls.net.load_state_dict(wk)
     model_cls.to(device)
 
+
+
+    optimizer = optim.Adam(model_cls.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.reg)
+    criterion = torch.nn.CrossEntropyLoss(size_average=True)
+    weight_criterion = CE(aggregate='mean')
 
 ########################################
     for epoch in range(n_epoch):
         output_list = []
         target_list = []
         train_loss = 0.
+        count = 0
+        no_count = 0
         for image, targets in tqdm(train_data_loader, desc="train..."):
             # img=data['img'].to(device, non_blocking=True).float()
             # target=data['label'].to(device, non_blocking=True).long()
@@ -251,7 +256,12 @@ def main(parser_data):
                 coordinates = outputs_after[i]
                 coordinates = coordinates.round().long()
                 targets_batch = gt_labels_after[i].to("cpu").numpy()
+                if len(targets_batch)<1:
+                    continue
+                bag_label = targets_batch.max()-1
                 targets_batch = [*map(lambda x: x - 1, targets_batch)]
+
+                bag_label = torch.tensor(bag_label).to(device).unsqueeze(dim=0)
                 targets_batch = torch.tensor(targets_batch).to(device)
                 input_cls_list = []
 
@@ -266,35 +276,58 @@ def main(parser_data):
                     face_imgs.append(face_img)
                     if j == 0:
                         _,stander = model1(face_img)    #tensor(1,2048)
-                if (len(face_imgs) > 0):
-
+                if (len(face_imgs) > 1 and len(face_imgs)<6):
+                    count+=1
                     face_imgs = torch.cat(face_imgs,dim=0)
-                    out_cls, loss = model_cls.train_step(face_imgs, targets_batch.long(), stander)
-                    train_loss += loss
-                    out_cls = out_cls.softmax(1)[:, 1].detach().to('cpu').numpy()
+                    # out_cls, loss = model_cls.train_step(face_imgs, targets_batch.long(), stander)
+                    optimizer.zero_grad()
+                    bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
+
+                    loss_1 = criterion(bag_pre, bag_label)
+                    # print("---------------------------")
+                    # print(instance_pre.size())
+                    # print(targets_batch.size())
+                    loss_2 = weight_criterion(instance_pre, targets_batch, weights=alpha)
+                    loss = loss_1 + 2.0 * loss_2
+
+                    # backward pass
+                    loss.backward()
+                    # step
+                    optimizer.step()
+
+                    out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                     output_list.extend(out_cls)
                     face_imgs = []
+
+                    for m in range(len(targets_batch)):
+                        target_list.append(gt_labels_after[i][m])
                 else:
+                    face_imgs = []
+                    no_count+=1
                     continue
 
 
 
 
-            # 将每个人脸的labels放进列表
-            for i in range(len(gt_labels_after)):
-                # temp_list=targets[i]['labels']
-                temp_list = gt_labels_after[i]
-                for j in range(len(temp_list)):
-                    target_list.append(temp_list[j])
+            # # 将每个人脸的labels放进列表
+            # for i in range(len(gt_labels_after)):
+            #     # temp_list=targets[i]['labels']
+            #     temp_list = gt_labels_after[i]
+            #     for j in range(len(temp_list)):
+            #         target_list.append(temp_list[j])
 
         target_list = [*map(lambda x: x - 1, target_list)]
         auc = roc_auc_score(target_list, output_list)
+        print(f'{epoch}--------------------------------------------')
+        print("count=",count)
+        print("no-count",no_count)
         print(f'openfor | train-AUC: {auc:.4f}')
 
         #sbi
         target_list = []
         output_list = []
-
+        count = 0
+        no_count = 0
         model_cls.eval()
         model1.eval()
 
@@ -339,7 +372,14 @@ def main(parser_data):
                     coordinates = outputs_after[i]
                     coordinates = coordinates.round().long()
                     targets_batch = gt_labels_after[i].to("cpu").numpy()
+
+                    if len(targets_batch) < 1:
+                        continue
+
+                    bag_label = targets_batch.max() - 1
+                    bag_label = torch.tensor(bag_label).to(device).unsqueeze(dim=0)
                     targets_batch = [*map(lambda x: x - 1, targets_batch)]
+
                     targets_batch = torch.tensor(targets_batch).to(device)
                     input_cls_list = []
 
@@ -353,36 +393,47 @@ def main(parser_data):
                         face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
                                                                    align_corners=False)
                         face_imgs.append(face_img)
-                        if j == 0:
-                            _, stander = model1(face_img)  # tensor(1,2048)
+                        # if j == 0:
+                        #     _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 0):
+                    if (len(face_imgs) > 1 and len(face_imgs)<8):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        out_cls = model_cls(face_imgs, stander)
-                        out_cls = out_cls.softmax(1)[:, 1].detach().to('cpu').numpy()
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs)
+                        out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
 
+                        for m in range(len(targets_batch)):
+                            target_list.append(gt_labels_after[i][m])
+                        count+=1
+
                     else:
+                        no_count+=1
+                        face_imgs = []
                         continue
 
-                # 将每个人脸的labels放进列表
-                for i in range(len(gt_labels_after)):
-                    # temp_list=targets[i]['labels']
-                    temp_list = gt_labels_after[i]
-                    for j in range(len(temp_list)):
-                        target_list.append(temp_list[j])
+                # # 将每个人脸的labels放进列表
+                # for i in range(len(gt_labels_after)):
+                #     # temp_list=targets[i]['labels']
+                #     temp_list = gt_labels_after[i]
+                #     for j in range(len(temp_list)):
+                #         target_list.append(temp_list[j])
 
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
             print(f'openfor | Val-AUC: {auc:.4f}')
+            print("count=", count)
+            print("no-count", no_count)
+
 
 
             target_list = []
             output_list = []
+            count=0
+            no_count=0
             #####################################################################################
-            for image, targets in tqdm(test_dataset_loader, desc="validation..."):
+            for image, targets in tqdm(test_dataset_loader, desc="test..."):
                 # 将图片传入指定设备device
 
                 image = list(img.to(device) for img in image)
@@ -422,6 +473,13 @@ def main(parser_data):
                     coordinates = outputs_after[i]
                     coordinates = coordinates.round().long()
                     targets_batch = gt_labels_after[i].to("cpu").numpy()
+
+                    if len(targets_batch) < 1:
+                        print("target-batch is null")
+                        continue
+
+                    bag_label = targets_batch.max() - 1
+                    bag_label = torch.tensor(bag_label).to(device).unsqueeze(dim=0)
                     targets_batch = [*map(lambda x: x - 1, targets_batch)]
                     targets_batch = torch.tensor(targets_batch).to(device)
                     input_cls_list = []
@@ -436,33 +494,40 @@ def main(parser_data):
                         face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
                                                                    align_corners=False)
                         face_imgs.append(face_img)
-                        if j == 0:
-                            _, stander = model1(face_img)  # tensor(1,2048)
+                        # if j == 0:
+                        #     _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 0):
+                    if (len(face_imgs) > 1 and len(face_imgs)<8):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        out_cls = model_cls(face_imgs, stander)
-                        out_cls = out_cls.softmax(1)[:, 1].detach().to('cpu').numpy()
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs)
+                        out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
 
+                        for m in range(len(targets_batch)):
+                            target_list.append(gt_labels_after[i][m])
+                        count+=1
                     else:
+                        no_count+=1
+                        face_imgs = []
                         continue
 
                 # 将每个人脸的labels放进列表
-                for i in range(len(gt_labels_after)):
-                    # temp_list=targets[i]['labels']
-                    temp_list = gt_labels_after[i]
-                    for j in range(len(temp_list)):
-                        target_list.append(temp_list[j])
+                # for i in range(len(gt_labels_after)):
+                #     # temp_list=targets[i]['labels']
+                #     temp_list = gt_labels_after[i]
+                #     for j in range(len(temp_list)):
+                #         target_list.append(temp_list[j])
 
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
             print(f'openfor | Test-AUC: {auc:.4f}')
+            print("count=", count)
+            print("no-count", no_count)
 
-        torch.save(model_cls.state_dict(),'./outputs/{}new_epoch.pth'.format(epoch))
-        torch.save(model1.state_dict(),'./outputs/{}new_Xception_epoch.pth'.format(epoch))
+        # torch.save(model_cls.state_dict(),'./outputs/{}new_epoch.pth'.format(epoch))
+        # torch.save(model1.state_dict(),'./outputs/{}new_Xception_epoch.pth'.format(epoch))
 
 
 
@@ -490,8 +555,12 @@ if __name__ == "__main__":
     # 类别索引和类别名称对应关系
     parser.add_argument('--label-json-path', type=str, default="./test_open.json")
 
-    parser.add_argument('--epoch', type=int, default=20)
+    parser.add_argument('--epoch', type=int, default=10)
     parser.add_argument('--resume', type=bool, default=False)
+    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
+                        help='learning rate (default: 0.01)')
+    parser.add_argument('--reg', type=float, default=10e-5, metavar='R',
+                        help='weight decay')
 
 
     args = parser.parse_args()
