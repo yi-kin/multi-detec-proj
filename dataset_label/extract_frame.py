@@ -3,8 +3,8 @@ import os
 import numpy as np
 
 # 定义每个视频需要抽取的帧数
-num_frames = 15
-
+num_frames = 5
+count0 = 0
 # 定义第一个视频每帧之间的时间间隔
 def get_interval(video_path, num_frames):
     # 读取视频时长
@@ -40,7 +40,9 @@ def get_random_frame(video_path):
     return random_frame_path
 
 # 遍历第一个视频数据集
-video_dir_1 = "video_dataset_1"
+video_dir_1 = "D:/dataset/FFIW10K-v1/FFIW10K-v1-release/target/train"
+save_path = "picture_target_train"
+
 for video_name in os.listdir(video_dir_1):
     video_path = os.path.join(video_dir_1, video_name)
 
@@ -50,26 +52,28 @@ for video_name in os.listdir(video_dir_1):
     # 抽取每个视频中的15帧
     cap = cv2.VideoCapture(video_path)
     count = 0
-    index = 0
+    index = 1
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
         count += 1
-        if count == int(index * interval * cap.get(cv2.CAP_PROP_FPS)):
+        temp = int(index * interval * cap.get(cv2.CAP_PROP_FPS))
+        if count == temp:
             index += 1
             # 保存帧
-            frame_path = os.path.join(video_dir_1, f"{video_name}_{count}.jpg")
-            cv2.imwrite(frame_path, frame)
-            if index >= num_frames:
+            frame_path = os.path.join(save_path, f"{video_name}_{count0}.jpg")
+            count0+=1
+            judge = cv2.imwrite(frame_path, frame)
+            if index >= num_frames+1:
                 break
     cap.release()
 
-# 遍历第二个视频数据集
-video_dir_2 = "video_dataset_2"
-for video_name in os.listdir(video_dir_2):
-    video_path = os.path.join(video_dir_2, video_name)
-
-    # 随机抽取一帧并保存
-    random_frame_path = get_random_frame(video_path)
-    print(f"Randomly selected frame from {video_path}: {random_frame_path}")
+# # 遍历第二个视频数据集
+# video_dir_2 = "video_dataset_2"
+# for video_name in os.listdir(video_dir_2):
+#     video_path = os.path.join(video_dir_2, video_name)
+#
+#     # 随机抽取一帧并保存
+#     random_frame_path = get_random_frame(video_path)
+#     print(f"Randomly selected frame from {video_path}: {random_frame_path}")
