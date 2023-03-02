@@ -40,16 +40,16 @@ class AttentionLayer(nn.Module):
     def __init__(self, dim=4096):
         super(AttentionLayer, self).__init__()
         self.dim = dim
-        self.linear1 = nn.Linear(dim, 128)
-        self.linear2 = nn.Linear(128,2)
-    def forward(self, features,mx,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
+        # self.linear1 = nn.Linear(dim, 128)
+        # self.linear2 = nn.Linear(128,2)
+    def forward(self, features,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
         if flag == 1:
             #下面这个是共享全连接层
             #out_c = F.linear(features, W_1, b_1)
 
-            out_c = self.linear1(features)
+            out_c = F.linear(features,W_1,b_1)
             out_c = F.relu(out_c)
-            out_c = self.linear2(out_c)
+            out_c = F.linear(out_c,W_2,b_2)
 
             out = out_c - out_c.max()
             out = out.exp()
@@ -57,10 +57,10 @@ class AttentionLayer(nn.Module):
             alpha = out / out.sum(0)
 
 
-            alpha01 = mx.size(0) * alpha.expand_as(mx) #alpha0:(4,2048)
+            alpha01 = features.size(0) * alpha.expand_as(features) #alpha0:(4,2048)
             # alpha01 =mx.size(0) * alpha.expand_as(mx) #alpha0:(4,2048)
 
-            context = torch.mul(mx, alpha01)
+            context = torch.mul(features, alpha01)
         else:
             context = features
             alpha = torch.zeros(features.size(0), 1)
@@ -75,7 +75,7 @@ class MIL_xcep(nn.Module):
         self.att_layer = AttentionLayer(4096)
         # self.linear = nn.Linear(2048, 2)
 
-        self.linear1 = nn.Linear(2048, 128)
+        self.linear1 = nn.Linear(4096, 128)
         self.linear2 = nn.Linear(128, 2)
 
 
@@ -93,13 +93,14 @@ class MIL_xcep(nn.Module):
         diff = mx - stander
         feature = torch.cat((diff, mx), dim=1)
 
-        out, out_c, alpha = self.att_layer(feature,mx,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
+        out, out_c, alpha = self.att_layer(feature,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
         # m = out
         out = out.mean(0, keepdim=True)
         # out = torch.matmul(alpha,out).unsqueeze(dim=0)
 
         out = self.linear1(out)
         out = F.relu(out)
+
         y = self.linear2(out)
 
         return y,out_c,alpha
@@ -490,7 +491,6 @@ def main(parser_data):
                     targets_batch = gt_labels_after[i].to("cpu").numpy()
 
                     if len(targets_batch) < 1:
-
                         continue
 
                     bag_label = targets_batch.max() - 1
