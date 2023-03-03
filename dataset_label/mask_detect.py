@@ -12,14 +12,14 @@ def get_center(rect):
 
 pic_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/tarin_mask_pic_save"
 
-def get_mask_detect(img,pic_name,save_path):
+def get_mask_detect(pic_name,save_path,img=None):
     # pic_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/tarin_mask_pic_save"
     # save_path = "mask_result"
     if pic_name == None:
         img_raw = img
     else:
-        each_pic_path = os.path.join(pic_path, pic_name)
-        img_raw = cv2.imread(each_pic_path, cv2.IMREAD_COLOR)
+        # each_pic_path = os.path.join(pic_path, pic_name)
+        img_raw = cv2.imread(pic_name, cv2.IMREAD_COLOR)
 
     gray = cv2.cvtColor(img_raw, cv2.COLOR_BGR2GRAY)
 

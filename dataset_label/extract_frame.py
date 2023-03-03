@@ -87,14 +87,14 @@ def begin_exract(video_path,num_frames,count0,save_path,video_name):
 # video_dir_1 = "D:/yifangbin/dataset/FFIW10K/FFIW10K-v1_2/FFIW10K-v1-release/target/val"
 # save_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/val_pic_save"
 #val_mask_img
-video_dir_1 = "D:/yifangbin/dataset/FFIW10K/FFIW10K-v1-release-test/FFIW10K-v1-release-test/target/test"
-video_dir_2 = "D:/yifangbin/dataset/FFIW10K/FFIW10K-v1-release-test/FFIW10K-v1-release-test/target_mask/test"
+video_dir_1 = "E:/yifangbin/dataset/FFIW10K/FFIW10K-v1-release-test/FFIW10K-v1-release-test/target/test"
+video_dir_2 = "E:/yifangbin/dataset/FFIW10K/FFIW10K-v1-release-test/FFIW10K-v1-release-test/target_mask/test"
 
-face_extract_save_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_face_extract"
-face_mask_extract_save_path = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_face_mask_extract"
+face_extract_save_path = "E:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_face_extract"
+face_mask_extract_save_path = "E:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_face_mask_extract"
 
-test_vider_random_frame = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_vedio_random_frame"
-test_mask_vedio_random_frame = "D:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_mask_vedio_random_frame"
+test_vider_random_frame = "E:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_vedio_random_frame"
+test_mask_vedio_random_frame = "E:/yifangbin/dataset/FFIW10K/FFIW10K_test/target/test_mask_vedio_random_frame"
 #统计
 face_statistics = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 face_mask_statistics = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
