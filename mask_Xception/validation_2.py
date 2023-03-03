@@ -15,7 +15,7 @@ import PIL
 import network_files
 import transforms
 from backbone import resnet50_fpn_backbone
-from my_dataset_openfrenic import OpenForensics
+from my_dataset_FFIW10K import OpenForensics
 from network_files import MaskRCNN
 # from my_dataset_coco import CocoDetection
 # from my_dataset_voc import VOCInstances
@@ -54,7 +54,7 @@ def main(parser_data):
 
     # load validation data set
     #val_dataset = CocoDetection(data_root, "Val", data_transform["val"])
-    val_dataset = OpenForensics(data_root,dataset='Test-Challenge',transform=data_transform["val"])
+    val_dataset = OpenForensics(data_root,dataset='Test',transform=data_transform["val"])
 
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
     # val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
@@ -208,7 +208,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-classes', type=int, default=2, help='number of classes')
 
     # 数据集的根目录
-    parser.add_argument('--data-path', default='../data/openfrenic', help='dataset root')
+    parser.add_argument('--data-path', default='../data/FFIW10K', help='dataset root')
 
     # 训练好的权重文件
     parser.add_argument('--weights-path', default='../multi_train/model_11.pth', type=str, help='training weights')
