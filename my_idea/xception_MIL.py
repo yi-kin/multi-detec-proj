@@ -232,22 +232,6 @@ class Xception(nn.Module):
 
 
 
-# def xception1(pretrained=False,**kwargs):
-#     """
-#     Construct Xception.
-#     """
-#
-#     model = Xception(**kwargs)
-#     if pretrained:
-#         model.load_state_dict(model_zoo.load_url(model_urls['xception']))
-#     weight = model.fc.weight
-#     bias = model.fc.bias
-#
-#     # 重置最后一层的权重和偏差
-#     model.fc.weight = nn.Parameter(torch.Tensor(2, 2048).uniform_(-0.1, 0.1))
-#     model.fc.bias = nn.Parameter(torch.Tensor(2).uniform_(-0.1, 0.1))
-#     return model
-
 class xception(nn.Module):
     def __init__(self,pre_train=False,**kwargs):
         super(xception, self).__init__()
@@ -255,13 +239,6 @@ class xception(nn.Module):
         if pre_train:
             self.net.load_state_dict(model_zoo.load_url(model_urls['xception']))
 
-
-        # 重置最后一层的权重和偏差
-        #self.net.fc.weight = nn.Parameter(torch.Tensor(2, 2048).uniform_(-0.1, 0.1))
-        #self.net.fc.bias = nn.Parameter(torch.Tensor(2).uniform_(-0.1, 0.1))
-
-        #self.cel = nn.CrossEntropyLoss()
-        #self.optimizer=SAM(self.parameters(),torch.optim.SGD,lr=0.001, momentum=0.9)
 
     def forward(self, x):
         x,mx = self.net(x)
@@ -287,19 +264,6 @@ class xception(nn.Module):
 if __name__ == '__main__':
     x = torch.randn(3,3,380,380)
     model = xception(pre_train=True)
-    # # 获取最后一层的权重和偏差
-    # weight = model.fc.weight
-    # bias = model.fc.bias
-    #
-    # # 重置最后一层的权重和偏差
-    # model.fc.weight = nn.Parameter(torch.Tensor(2, 2048).uniform_(-0.1, 0.1))
-    # model.fc.bias = nn.Parameter(torch.Tensor(2).uniform_(-0.1, 0.1))
-
-    # model.fc = NewClassifier()
-    #
-    # # 如果需要，可以设置新的分类层的权重和偏差
-    # model.fc.linear.weight = nn.Parameter(torch.Tensor(2, 1000).uniform_(-0.1, 0.1))
-    # model.fc.linear.bias = nn.Parameter(torch.Tensor(2).uniform_(-0.1, 0.1))
 
     torch.save(model,'xception1.pth')
     print(model(x).shape)

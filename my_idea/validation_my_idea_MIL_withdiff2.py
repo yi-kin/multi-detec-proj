@@ -541,7 +541,7 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        # torch.save(model_cls.state_dict(),'./outputs/{}new_epoch.pth'.format(epoch))
+        torch.save(model_cls.state_dict(),'./outputs/{}diff2_epoch.pth'.format(epoch))
         # torch.save(model1.state_dict(),'./outputs/{}new_Xception_epoch.pth'.format(epoch))
 
 

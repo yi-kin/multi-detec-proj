@@ -1,6 +1,5 @@
 """
-该脚本用于调用训练好的模型权重去计算验证集/测试集的COCO指标
-以及每个类别的mAP(IoU=0.5)
+此文件是用于在Imagenet上训练的xception在FFIW上的验证,xception最后的fc随机初始化权重
 """
 
 import os
@@ -15,7 +14,9 @@ import PIL
 import network_files
 import transforms
 from backbone import resnet50_fpn_backbone
-from my_dataset_FFIW10K import OpenForensics
+from my_dataset_openfrenic import OpenForensics
+from my_dataset_FFIW10K import FFIW
+
 from network_files import MaskRCNN
 # from my_dataset_coco import CocoDetection
 # from my_dataset_voc import VOCInstances
@@ -54,7 +55,7 @@ def main(parser_data):
 
     # load validation data set
     #val_dataset = CocoDetection(data_root, "Val", data_transform["val"])
-    val_dataset = OpenForensics(data_root,dataset='Test',transform=data_transform["val"])
+    val_dataset = FFIW(data_root,dataset='Test',transform=data_transform["val"])
 
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
     # val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
@@ -86,10 +87,11 @@ def main(parser_data):
 
 #Xceptionmodel
     model1 = xception()
+    cnn_sd = torch.load('xception2.pth', map_location="cpu")
+    model1.load_state_dict(cnn_sd)
     model1.net.fc = nn.Linear(model1.net.fc.in_features, 2)
     nn.init.xavier_uniform_(model1.net.fc.weight)
-    cnn_sd = torch.load('pre_trained75.tar', map_location="cpu")["model"]
-    model1.load_state_dict(cnn_sd)
+
     model1 = model1.to(device)
 
     model1.eval()
@@ -185,7 +187,7 @@ def main(parser_data):
             # seg_metric.update(targets, outputs)
     target_list = [*map(lambda x: x - 1, target_list)]
     auc = roc_auc_score(target_list, output_list)
-    print(f'openfor | AUC: {auc:.4f}')
+    print(f'FFIW | xception-AUC: {auc:.4f}')
     # det_metric.synchronize_results()
     # seg_metric.synchronize_results()
     # det_metric.evaluate()

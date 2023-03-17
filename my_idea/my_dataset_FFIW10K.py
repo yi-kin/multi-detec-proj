@@ -9,10 +9,10 @@ from train_utils import convert_to_coco_api, convert_coco_poly_mask
 
 
 class FFIW(Dataset):
-    def __init__(self,root,dataset='Test',transform=None):
+    def __init__(self,root,dataset='Train',transform=None):
         super(FFIW, self).__init__()
 
-        self.image_dir = os.path.join(root,f"Test")
+        self.image_dir = os.path.join(root,f"{dataset}")
         self.anno_path = os.path.join(root,f"{dataset}_poly.json")
         self.transforms = transform
         self.coco = COCO(self.anno_path)
