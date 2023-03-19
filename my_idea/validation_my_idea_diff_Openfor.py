@@ -37,8 +37,11 @@ class ClassifierD(nn.Module):
         #########################
         self.xcep = xception
         #############################
-        self.linear1 = nn.Linear(4096, 128)
-        self.linear2 = nn.Linear(128, output_dim)
+        # self.linear1 = nn.Linear(4096, 128)
+        # self.linear2 = nn.Linear(128, output_dim)
+
+        self.linear1 = nn.Linear(4096, 2)
+        # self.linear2 = nn.Linear(128, output_dim)
 
         for name,param in self.xcep.net.named_parameters():
             if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
@@ -48,12 +51,13 @@ class ClassifierD(nn.Module):
     def forward(self, x,y):
 
         x,mx = self.xcep(x)
+
         diff = mx-y
         x = torch.cat((mx, diff), dim=1)
 
         x = self.linear1(x)
-        x = F.relu(x)
-        x = self.linear2(x)
+        # x = F.relu(x)
+        # x = self.linear2(x)
         return x
 
 
@@ -159,7 +163,7 @@ def main(parser_data):
     ############resume
 
     model_cls.to(device)
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=10e-5)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
 
 
@@ -413,12 +417,7 @@ def main(parser_data):
                         face_imgs = []
                         continue
 
-                # 将每个人脸的labels放进列表
-                # for i in range(len(gt_labels_after)):
-                #     # temp_list=targets[i]['labels']
-                #     temp_list = gt_labels_after[i]
-                #     for j in range(len(temp_list)):
-                #         target_list.append(temp_list[j])
+
 
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
@@ -501,8 +500,8 @@ def main(parser_data):
             auc = roc_auc_score(target_list, output_list)
             print(f'openfor | Test-Chanllenge-diff-AUC: {auc:.4f}')
 
-        torch.save(model_cls.state_dict(),'./outputs/Openfor_CLS_diff_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
-        torch.save(model1.state_dict(),'./outputs/Openfor_xcep_diff_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        torch.save(model_cls.state_dict(),'./outputs_diff/Openfor_CLS_diff_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        torch.save(model1.state_dict(),'./outputs_diff/Openfor_xcep_diff_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
 
 
 

@@ -199,7 +199,7 @@ def main(parser_data):
 
 
 
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=args.reg)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=args.reg)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
     weight_criterion = CE(aggregate='mean')
 
@@ -565,8 +565,8 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        torch.save(model_cls.state_dict(),'./outputs/Openfor_CLS_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
-        torch.save(model1.state_dict(),'./outputs/Openfor_xcep_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        torch.save(model_cls.state_dict(),'./outputs_MIL/Openfor_CLS_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        torch.save(model1.state_dict(),'./outputs_MIL/Openfor_xcep_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
 
 
 

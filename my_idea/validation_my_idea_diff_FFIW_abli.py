@@ -98,12 +98,7 @@ def main(parser_data):
                                                     num_workers=nw,
                                                     collate_fn=train_dataset.collate_fn)
 
-    # val_dataset_loader = torch.utils.data.DataLoader(val_dataset,
-    #                                                  batch_size=batch_size,
-    #                                                  shuffle=False,
-    #                                                  pin_memory=True,
-    #                                                  num_workers=nw,
-    #                                                  collate_fn=val_dataset.collate_fn)
+
     test_dataset_loader = torch.utils.data.DataLoader(test_dataset,
                                                      batch_size=batch_size,
                                                      shuffle=False,
@@ -150,7 +145,7 @@ def main(parser_data):
     ############resume
 
     model_cls.to(device)
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=10e-5)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
 
 
@@ -240,12 +235,7 @@ def main(parser_data):
                     face_imgs = []
                     continue
 
-            # 将每个人脸的labels放进列表
-            # for i in range(len(gt_labels_after)):
-            #     # temp_list=targets[i]['labels']
-            #     temp_list = gt_labels_after[i]
-            #     for j in range(len(temp_list)):
-            #         target_list.append(temp_list[j])
+
 
         target_list = [*map(lambda x: x - 1, target_list)]
         auc = roc_auc_score(target_list, output_list)
@@ -259,87 +249,6 @@ def main(parser_data):
         model1.eval()
 
         with torch.no_grad():
-            # for image, targets in tqdm(val_dataset_loader, desc="validation..."):
-            #     # 将图片传入指定设备device
-            #
-            #     image = list(img.to(device) for img in image)
-            #     outputs = model(image)
-            #     outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
-            #
-            #     ########################这是将多余检测框去掉或是去掉多余的标注，方便后面计算AUC#######################################3
-            #     gt_boxes = [t["boxes"] for t in targets]
-            #     gt_labels = [t["labels"] for t in targets]
-            #     outputs_ = [t["boxes"] for t in outputs]
-            #     gt_boxes_after = []
-            #     gt_labels_after = []
-            #     outputs_after = []
-            #     for outputs_in_image, gt_boxes_in_image, gt_labels_in_image in zip(outputs_, gt_boxes, gt_labels):
-            #         if (len(gt_labels_in_image) >= len(outputs_in_image)):
-            #             match_quality_matrix = box_ops.box_iou(outputs_in_image, gt_boxes_in_image)
-            #             _, indices = match_quality_matrix.max(dim=1)
-            #             gt_boxes_in_image = gt_boxes_in_image[indices]
-            #             gt_labels_in_image = gt_labels_in_image[indices]
-            #             gt_boxes_after.append(gt_boxes_in_image)
-            #             gt_labels_after.append(gt_labels_in_image)
-            #             outputs_after.append(outputs_in_image)
-            #         else:
-            #             match_quality_matrix = box_ops.box_iou(gt_boxes_in_image, outputs_in_image)
-            #             _, indices = match_quality_matrix.max(dim=1)
-            #             outputs_in_image = outputs_in_image[indices]
-            #             gt_boxes_after.append(gt_boxes_in_image)
-            #             gt_labels_after.append(gt_labels_in_image)
-            #             outputs_after.append(outputs_in_image)
-            #     ##########################################################################
-            #
-            #     face_imgs = []
-            #     # 将图片中的人脸剪裁出来，准备放入SBI模型中
-            #     for i in range(len(outputs_after)):
-            #         # coordinates = outputs[i]['boxes']
-            #         face_input = []
-            #         coordinates = outputs_after[i]
-            #         coordinates = coordinates.round().long()
-            #         targets_batch = gt_labels_after[i].to("cpu").numpy()
-            #         if len(targets_batch) < 1:
-            #             continue
-            #         targets_batch = [*map(lambda x: x - 1, targets_batch)]
-            #         targets_batch = torch.tensor(targets_batch).to(device)
-            #         input_cls_list = []
-            #
-            #         #if len(coordinates) > 1:
-            #             # stander = torch.randn(2048,)
-            #         for j in range(len(coordinates)):
-            #             # coordinates = coordinates.round().long()
-            #             # coordinates_size = (coordinates[j][3]-coordinates[j][1],coordinates[j][2]-coordinates[j][0])
-            #             face_img = image[i][:, coordinates[j][1]:coordinates[j][3], coordinates[j][0]:coordinates[j][2]]
-            #             face_img = face_img.unsqueeze(dim=0)
-            #             face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
-            #                                                        align_corners=False)
-            #             face_imgs.append(face_img)
-            #             if j == 0:
-            #                 _, stander = model1(face_img)  # tensor(1,2048)
-            #
-            #         if (len(face_imgs) > 1 and len(face_imgs)<9):
-            #
-            #             face_imgs = torch.cat(face_imgs, dim=0)
-            #             out_cls = model_cls(face_imgs, stander)
-            #             out_cls = out_cls.softmax(1)[:, 1].detach().to('cpu').numpy()
-            #             output_list.extend(out_cls)
-            #             face_imgs = []
-            #
-            #         else:
-            #             face_imgs = []
-            #             continue
-            #
-            #     # 将每个人脸的labels放进列表
-            #     for i in range(len(gt_labels_after)):
-            #         # temp_list=targets[i]['labels']
-            #         temp_list = gt_labels_after[i]
-            #         for j in range(len(temp_list)):
-            #             target_list.append(temp_list[j])
-            #
-            # target_list = [*map(lambda x: x - 1, target_list)]
-            # auc = roc_auc_score(target_list, output_list)
-            # print(f'openfor | Val-AUC: {auc:.4f}')
 
 
             target_list = []
@@ -417,12 +326,6 @@ def main(parser_data):
                         face_imgs = []
                         continue
 
-                # 将每个人脸的labels放进列表
-                # for i in range(len(gt_labels_after)):
-                #     # temp_list=targets[i]['labels']
-                #     temp_list = gt_labels_after[i]
-                #     for j in range(len(temp_list)):
-                #         target_list.append(temp_list[j])
 
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
