@@ -74,8 +74,8 @@ class MIL_xcep(nn.Module):
 
 
         for name,param in self.xception.named_parameters():
-            if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
-                param.requires_grad_(False)
+            # if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
+            param.requires_grad_(False)
 
 
     def forward(self, x,stander,flag=1):
@@ -182,7 +182,9 @@ def main(parser_data):
     model1.net.fc = nn.Linear(model1.net.fc.in_features, 2)
     nn.init.xavier_uniform_(model1.net.fc.weight)
 
-    cnn_sd = torch.load('Openfor：1epoch-0.9668582683719695.pth', map_location="cpu")
+    # cnn_sd = torch.load('Openfor：1epoch-0.9668582683719695.pth', map_location="cpu")
+    cnn_sd = torch.load('pre_trained75.tar', map_location="cpu")["model"]
+
     model1.load_state_dict(cnn_sd)
 
     model1.net.num_classes = 2
@@ -192,7 +194,7 @@ def main(parser_data):
 #############################################
     model_cls = MIL_xcep(model1)
 
-    model1.train()
+    model1.eval()
     model_cls.train()
 
     model_cls.to(device)
@@ -205,7 +207,7 @@ def main(parser_data):
 
 ########################################
     for epoch in range(n_epoch):
-        model1.train()
+        model1.eval()
         model_cls.train()
         output_list = []
         target_list = []
@@ -575,8 +577,8 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        torch.save(model_cls.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}-.pth'.format(epoch, auc))
-        torch.save(model1.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}.pth'.format(epoch, auc))
+        # torch.save(model_cls.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}-.pth'.format(epoch, auc))
+        # torch.save(model1.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}.pth'.format(epoch, auc))
 
 
 

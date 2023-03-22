@@ -1,5 +1,6 @@
 """
-这是两个方法的结合训练，diff2是共享全连接层的
+该脚本用于调用训练好的模型权重去计算验证集/测试集的COCO指标
+以及每个类别的mAP(IoU=0.5)
 """
 #!/usr/bin/env python
 # coding=utf-8
@@ -14,15 +15,16 @@ import PIL
 import network_files
 import transforms
 from backbone import resnet50_fpn_backbone
-
 from my_dataset_FFIW10K import FFIW
 
 from network_files import MaskRCNN
-
+#from my_dataset_coco import CocoDetection
+#from my_dataset_voc import VOCInstances
+#from train_utils import EvalCOCOMetric
 #Sbi导入的文件
 from xception_MIL import xception
 #from PIL import Image
-
+from torchvision.transforms import Resize
 from sklearn.metrics import confusion_matrix, roc_auc_score
 
 from network_files import boxes as box_ops
@@ -41,17 +43,17 @@ class AttentionLayer(nn.Module):
     def __init__(self, dim=4096):
         super(AttentionLayer, self).__init__()
         self.dim = dim
+        self.linear1 = nn.Linear(dim, 128)
+        self.linear2 = nn.Linear(128,2)
         self.criterion = torch.nn.CrossEntropyLoss(size_average=True)
-    # def forward(self, features,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
-    def forward(self, features, targets,W_1, b_1, W_2, b_2, flag):  # feature:(4,2048)
-
+    def forward(self, features,mx,targets,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
         if flag == 1:
             #下面这个是共享全连接层
             #out_c = F.linear(features, W_1, b_1)
 
-            out_c = F.linear(features,W_1,b_1)
+            out_c = self.linear1(features)
             out_c = F.relu(out_c)
-            out_c = F.linear(out_c,W_2,b_2)
+            out_c = self.linear2(out_c)
 
             losses = []
             for i in range(len(out_c)):
@@ -63,15 +65,16 @@ class AttentionLayer(nn.Module):
 
             losses = torch.tensor(losses).unsqueeze(dim=1).to("cuda")
 
-            m = losses.expand_as(features)
-            # alpha01 = features.size(0) * alpha.expand_as(features) #alpha0:(4,2048)
+            m = losses.expand_as(mx)
+
+            # alpha01 = mx.size(0) * alpha.expand_as(mx) #alpha0:(4,2048)
             # alpha01 =mx.size(0) * alpha.expand_as(mx) #alpha0:(4,2048)
 
-            context = torch.mul(features, m)
+            context = torch.mul(mx, m)
         else:
             context = features
             alpha = torch.zeros(features.size(0), 1)
-            losses = 0
+            out_c = 0
 
         return context, out_c, torch.squeeze(losses)
 
@@ -80,13 +83,16 @@ class MIL_xcep(nn.Module):
         super(MIL_xcep, self).__init__()
         self.xception = xcep
         self.att_layer = AttentionLayer(4096)
-        self.linear1 = nn.Linear(4096, 128)
+        # self.linear = nn.Linear(2048, 2)
+
+        self.linear1 = nn.Linear(2048, 128)
         self.linear2 = nn.Linear(128, 2)
 
-
-        for name,param in self.xception.named_parameters():
-            # if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
+        for name, param in self.xception.named_parameters():
+            # if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight',
+            #                 'conv4.pointwise.weight']:
             param.requires_grad_(False)
+
 
 
     def forward(self, x,stander,targets,flag=1):
@@ -94,23 +100,22 @@ class MIL_xcep(nn.Module):
         diff = mx - stander
         feature = torch.cat((mx,diff), dim=1)
 
-        out, out_c, alpha = self.att_layer(feature,targets,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
-        # out, out_c, alpha = self.att_layer(feature,self.linear1.weight, self.linear1.bias,flag)
-
-
+        out, out_c, alpha = self.att_layer(feature,mx,targets,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
+        # m = out
         # out = out.mean(0, keepdim=True)
         # out = torch.matmul(alpha,out).unsqueeze(dim=0)
         out = out.sum(dim=0)
 
-        out= self.linear1(out)
+        out = self.linear1(out)
         out = F.relu(out)
         y = self.linear2(out)
 
         return y,out_c,alpha
 
 
+
 def main(parser_data):
-    print("-----------两个方法结合，共 全连接层FFIW------------------")
+    print("-----------这次是第一次将两个方法结合起来，有一个问题，在包聚合的时候，包也有diff的特征，感觉是多余的------------------")
 
 
     device = torch.device(parser_data.device if torch.cuda.is_available() else "cpu")
@@ -140,7 +145,7 @@ def main(parser_data):
     #加载数据集
     data_root = parser_data.data_path
     train_dataset = FFIW(data_root, "Train", data_transform["train"])
-    test_dataset = FFIW(data_root,dataset='Test',transform=data_transform["val"])
+    test_dataset = FFIW(data_root, dataset='Test', transform=data_transform["val"])
 
     train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_size=batch_size,
@@ -149,13 +154,12 @@ def main(parser_data):
                                                     num_workers=nw,
                                                     collate_fn=train_dataset.collate_fn)
 
-
     test_dataset_loader = torch.utils.data.DataLoader(test_dataset,
-                                                     batch_size=batch_size,
-                                                     shuffle=False,
-                                                     pin_memory=True,
-                                                     num_workers=nw,
-                                                     collate_fn=test_dataset.collate_fn)
+                                                      batch_size=batch_size,
+                                                      shuffle=False,
+                                                      pin_memory=True,
+                                                      num_workers=nw,
+                                                      collate_fn=test_dataset.collate_fn)
 
 
     # create model（目标检测的模型）################1111#####################
@@ -178,13 +182,19 @@ def main(parser_data):
 
 #Xception--model############################
     model1 = xception()  #这已经改成了二分类了
+    #model1.load_state_dict(torch.load('xception2.pth'))
+
     model1.net.fc = nn.Linear(model1.net.fc.in_features, 2)
     nn.init.xavier_uniform_(model1.net.fc.weight)
 
     cnn_sd = torch.load('FFIW：3epoch-0.8308557893871815.pth', map_location="cpu")
     model1.load_state_dict(cnn_sd)
+
     model1.net.num_classes = 2
     model1 = model1.to(device)
+
+
+
 
     n_epoch = args.epoch
 #############################################
@@ -199,7 +209,7 @@ def main(parser_data):
 
     optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
-    weight_criterion = CE(aggregate='mean')
+    weight_criterion = CE(aggregate='sum')
 
 ########################################
     for epoch in range(n_epoch):
@@ -213,12 +223,12 @@ def main(parser_data):
         print(f'--------------epoch:{epoch}-------------------')
         for image, targets in tqdm(train_data_loader, desc="train..."):
 
-            #改动
+            # 改动
             image = list(img.to(device) for img in image)
             outputs = model(image)
             outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
 
-           ########################这是将多余检测框去掉或是去掉多余的标注，方便后面计算AUC#######################################3
+            ########################这是将多余检测框去掉或是去掉多余的标注，方便后面计算AUC#######################################3
             gt_boxes = [t["boxes"] for t in targets]
             gt_labels = [t["labels"] for t in targets]
             outputs_ = [t["boxes"] for t in outputs]
@@ -251,15 +261,14 @@ def main(parser_data):
                 coordinates = outputs_after[i]
                 coordinates = coordinates.round().long()
                 targets_batch = gt_labels_after[i].to("cpu").numpy()
-                if len(targets_batch)<1:
+                if len(targets_batch) < 1:
                     continue
-                bag_label = targets_batch.max()-1
+                bag_label = targets_batch.max() - 1
                 targets_batch = [*map(lambda x: x - 1, targets_batch)]
 
                 bag_label = torch.tensor(bag_label).to(device).unsqueeze(dim=0)
                 targets_batch = torch.tensor(targets_batch).to(device)
                 input_cls_list = []
-
 
                 for j in range(len(coordinates)):
 
@@ -268,18 +277,18 @@ def main(parser_data):
                     face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear', align_corners=False)
                     face_imgs.append(face_img)
                     if j == 0:
-                        _,stander = model1(face_img)    #tensor(1,2048)
+                        _, stander = model1(face_img)  # tensor(1,2048)
 
-                if (len(face_imgs) > 1 and len(face_imgs)<10):
-                    count+=1
-                    face_imgs = torch.cat(face_imgs,dim=0)
+                if (len(face_imgs) > 1 and len(face_imgs) < 10):
+                    count += 1
+                    face_imgs = torch.cat(face_imgs, dim=0)
 
                     optimizer.zero_grad()
-                    bag_pre,instance_pre,alpha = model_cls(face_imgs,stander,bag_label)
+                    bag_pre, instance_pre, alpha = model_cls(face_imgs, stander,bag_label)
 
                     loss_1 = criterion(bag_pre.unsqueeze(dim=0), bag_label)
                     loss_2 = weight_criterion(instance_pre, targets_batch, weights=alpha)
-                    loss = loss_1+loss_2
+                    loss = loss_1 +  loss_2
 
                     # backward pass
                     loss.backward()
@@ -294,18 +303,14 @@ def main(parser_data):
                         target_list.append(gt_labels_after[i][m])
                 else:
                     face_imgs = []
-                    no_count+=1
+                    no_count += 1
                     continue
-
 
         target_list = [*map(lambda x: x - 1, target_list)]
         auc = roc_auc_score(target_list, output_list)
-        print("count=",count)
-        print("no-count",no_count)
+        print("count=", count)
+        print("no-count", no_count)
         print(f'FFIW | train-together-AUC: {auc:.4f}')
-
-
-
 
         model_cls.eval()
         model1.eval()
@@ -313,8 +318,8 @@ def main(parser_data):
         with torch.no_grad():
             target_list = []
             output_list = []
-            count=0
-            no_count=0
+            count = 0
+            no_count = 0
             #####################################################################################
             for image, targets in tqdm(test_dataset_loader, desc="test..."):
                 # 将图片传入指定设备device
@@ -375,19 +380,19 @@ def main(parser_data):
                         if j == 0:
                             _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 1 and len(face_imgs)<10):
+                    if (len(face_imgs) > 1 and len(face_imgs) < 10):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander,bag_label)
+                        bag_pre, instance_pre, alpha = model_cls(face_imgs, stander,bag_label)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
 
                         for m in range(len(targets_batch)):
                             target_list.append(gt_labels_after[i][m])
-                        count+=1
+                        count += 1
                     else:
-                        no_count+=1
+                        no_count += 1
                         face_imgs = []
                         continue
 
@@ -397,8 +402,8 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        # torch.save(model_cls.state_dict(),'./outputs_my_idea/FFIW:share-{}epoch-auc:{}-.pth'.format(epoch,auc))
-        # torch.save(model1.state_dict(),'./outputs_my_idea/FFIW:share-{}epoch-auc:{}.pth'.format(epoch,auc))
+        # torch.save(model_cls.state_dict(), './outputs_my_idea/FFIW:noshare-{}epoch-auc:{}-.pth'.format(epoch, auc))
+        # torch.save(model1.state_dict(), './outputs_my_idea/FFIW:noshare-{}epoch-auc:{}.pth'.format(epoch, auc))
 
 
 
@@ -427,7 +432,11 @@ if __name__ == "__main__":
     parser.add_argument('--label-json-path', type=str, default="./test_open.json")
 
     parser.add_argument('--epoch', type=int, default=10)
-
+    parser.add_argument('--resume', type=bool, default=False)
+    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
+                        help='learning rate (default: 0.01)')
+    parser.add_argument('--reg', type=float, default=10e-5, metavar='R',
+                        help='weight decay')
 
 
     args = parser.parse_args()

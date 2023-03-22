@@ -42,14 +42,14 @@ class AttentionLayer(nn.Module):
         self.dim = dim
         self.linear = nn.Linear(dim, 1)
 
-    # def forward(self, features, W_1, b_1,W_2 ,b_2,flag): #feature:(4,2048)
-    def forward(self, features, W_1, b_1, flag):  # feature:(4,2048)
+    def forward(self, features, W_1, b_1,W_2 ,b_2,flag): #feature:(4,2048)
+    # def forward(self, features, W_1, b_1, flag):  # feature:(4,2048)
 
         if flag == 1:
             #下面这个是共享全连接层
             out_c = F.linear(features, W_1, b_1)
-            # out_c = F.relu(out_c)
-            # out_c = F.linear(out_c,W_2,b_2)
+            out_c = F.relu(out_c)
+            out_c = F.linear(out_c,W_2,b_2)
 
             out = out_c - out_c.max()
             out = out.exp()
@@ -69,12 +69,12 @@ class MIL_xcep(nn.Module):
         super(MIL_xcep, self).__init__()
         self.xception = xcep
         self.att_layer = AttentionLayer(2048)
-        self.linear1 = nn.Linear(2048, 2)
-        # self.linear2 = nn.Linear(128, 2)
+        self.linear1 = nn.Linear(2048, 128)
+        self.linear2 = nn.Linear(128, 2)
         params = {}
         for name,param in self.xception.named_parameters():
-            if name not in  ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
-                param.requires_grad_(False)
+            # if name not in  ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
+            param.requires_grad_(False)
 
 
 
@@ -82,16 +82,16 @@ class MIL_xcep(nn.Module):
     def forward(self, x, flag=1):
         _,mx = self.xception(x)
 
-        # out, out_c, alpha = self.att_layer(mx, self.linear1.weight, self.linear1.bias,self.linear2.weight,self.linear2.bias, flag)
-        out, out_c, alpha = self.att_layer(mx, self.linear1.weight, self.linear1.bias, flag)
+        out, out_c, alpha = self.att_layer(mx, self.linear1.weight, self.linear1.bias,self.linear2.weight,self.linear2.bias, flag)
+        # out, out_c, alpha = self.att_layer(mx, self.linear1.weight, self.linear1.bias, flag)
 
         # m = out
         out = out.mean(0, keepdim=True)
 
 
         y = self.linear1(out)
-        # y = F.relu(y)
-        # y = self.linear2(y)
+        y = F.relu(y)
+        y = self.linear2(y)
 
         return y,out_c,alpha
 
@@ -177,7 +177,7 @@ def main(parser_data):
     model1.net.num_classes = 2
     model1 = model1.to(device)
 
-    model1.train()
+    model1.eval()
 
 
     n_epoch = args.epoch
@@ -190,13 +190,13 @@ def main(parser_data):
 
 
 
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=args.reg)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=args.reg)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
     weight_criterion = CE(aggregate='mean')
 
 ########################################
     for epoch in range(n_epoch):
-        model1.train()
+        model1.eval()
         model_cls.train()
 
         output_list = []
@@ -274,6 +274,7 @@ def main(parser_data):
 
                     loss_2 = weight_criterion(instance_pre, targets_batch, weights=alpha)
                     loss = loss_1 + 2.0 * loss_2
+
 
                     # backward pass
                     loss.backward()
@@ -392,8 +393,8 @@ def main(parser_data):
             print("no-count", no_count)
 
 
-        torch.save(model_cls.state_dict(),'./outputs_MIL/FFIW_CLS_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
-        torch.save(model1.state_dict(),'./outputs_MIL/FFIW_xcep_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        # torch.save(model_cls.state_dict(),'./outputs_MIL/FFIW_CLS_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
+        # torch.save(model1.state_dict(),'./outputs_MIL/FFIW_xcep_MIL_{}epoch-(test-auc:{}).pth'.format(epoch,auc))
 
 
 
