@@ -42,7 +42,7 @@ class AttentionLayer(nn.Module):
         super(AttentionLayer, self).__init__()
         self.dim = dim
         self.criterion = torch.nn.CrossEntropyLoss(size_average=True)
-    # def forward(self, features,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
+
     def forward(self, features, targets,W_1, b_1, W_2, b_2, flag):  # feature:(4,2048)
 
         if flag == 1:
@@ -85,8 +85,8 @@ class MIL_xcep(nn.Module):
 
 
         for name,param in self.xception.named_parameters():
-            # if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
-            param.requires_grad_(False)
+            if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
+                param.requires_grad_(False)
 
 
     def forward(self, x,stander,targets,flag=1):
@@ -181,7 +181,8 @@ def main(parser_data):
     model1.net.fc = nn.Linear(model1.net.fc.in_features, 2)
     nn.init.xavier_uniform_(model1.net.fc.weight)
 
-    cnn_sd = torch.load('FFIW：3epoch-0.8308557893871815.pth', map_location="cpu")
+    cnn_sd = torch.load('FFIW：4epoch-0.8106308637325128.pth', map_location="cpu")
+
     model1.load_state_dict(cnn_sd)
     model1.net.num_classes = 2
     model1 = model1.to(device)
@@ -199,7 +200,7 @@ def main(parser_data):
 
     optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
-    weight_criterion = CE(aggregate='mean')
+    weight_criterion = CE(aggregate='sum')
 
 ########################################
     for epoch in range(n_epoch):
@@ -210,6 +211,7 @@ def main(parser_data):
         train_loss = 0.
         count = 0
         no_count = 0
+        print("微调，lr=0.0005，sum，1倍instance，改了人脸的检测数量范围   label3")
         print(f'--------------epoch:{epoch}-------------------')
         for image, targets in tqdm(train_data_loader, desc="train..."):
 
@@ -270,7 +272,7 @@ def main(parser_data):
                     if j == 0:
                         _,stander = model1(face_img)    #tensor(1,2048)
 
-                if (len(face_imgs) > 1 and len(face_imgs)<10):
+                if (len(face_imgs) > 1 and len(face_imgs)<11):
                     count+=1
                     face_imgs = torch.cat(face_imgs,dim=0)
 
@@ -397,8 +399,8 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        # torch.save(model_cls.state_dict(),'./outputs_my_idea/FFIW:share-{}epoch-auc:{}-.pth'.format(epoch,auc))
-        # torch.save(model1.state_dict(),'./outputs_my_idea/FFIW:share-{}epoch-auc:{}.pth'.format(epoch,auc))
+        torch.save(model_cls.state_dict(),'./outputs_my_idea/FFIW:share-label3-{}epoch-auc:{}-.pth'.format(epoch,auc))
+        torch.save(model1.state_dict(),'./outputs_my_idea/FFIW:share-label3-{}epoch-auc:{}.pth'.format(epoch,auc))
 
 
 

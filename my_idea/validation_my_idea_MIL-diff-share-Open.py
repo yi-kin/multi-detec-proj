@@ -5,7 +5,7 @@
 # coding=utf-8
 import os
 import json
-
+import math
 import torch
 from tqdm import tqdm
 import numpy as np
@@ -33,36 +33,43 @@ from weight_loss import CrossEntropyLoss as CE
 import torch.optim as optim
 
 
-
+def normalize_list(lst):
+    s = sum(lst)
+    return [i/s for i in lst]
 
 class AttentionLayer(nn.Module):
     def __init__(self, dim=4096):
         super(AttentionLayer, self).__init__()
         self.dim = dim
+        self.criterion = torch.nn.CrossEntropyLoss(size_average=True)
 
-    def forward(self, features,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
+    def forward(self, features,targets,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
         if flag == 1:
 
             out_c = F.linear(features,W_1,b_1)
             out_c = F.relu(out_c)
             out_c = F.linear(out_c,W_2,b_2)
 
-            out = out_c - out_c.max()
-            out = out.exp()
-            out = out.sum(1, keepdim=True)
-            alpha = out / out.sum(0)
+            losses = []
+            for i in range(len(out_c)):
+                loss = self.criterion(out_c[i].unsqueeze(dim=0), targets)
+                losses.append(loss)
+
+            losses = [math.exp(-x) for x in losses]
+            losses = normalize_list(losses)
+
+            losses = torch.tensor(losses).unsqueeze(dim=1).to("cuda")
+
+            m = losses.expand_as(features)
 
 
-            alpha01 = features.size(0) * alpha.expand_as(features) #alpha0:(4,2048)
-
-
-            context = torch.mul(features, alpha01)
+            context = torch.mul(features, m)
         else:
             context = features
             alpha = torch.zeros(features.size(0), 1)
-            out_c = 0
+            losses = 0
 
-        return context, out_c, torch.squeeze(alpha)
+        return context, out_c, torch.squeeze(losses)
 
 class MIL_xcep(nn.Module):
     def __init__(self,xcep):
@@ -78,15 +85,13 @@ class MIL_xcep(nn.Module):
             param.requires_grad_(False)
 
 
-    def forward(self, x,stander,flag=1):
+    def forward(self, x,stander,targets,flag=1):
         _,mx = self.xception(x)
         diff = mx - stander
         feature = torch.cat((diff, mx), dim=1)
 
-        out, out_c, alpha = self.att_layer(feature,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
-        # m = out
-        out = out.mean(0, keepdim=True)
-
+        out, out_c, alpha = self.att_layer(feature,targets,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
+        out = out.sum(dim=0)
 
         out = self.linear1(out)
         out = F.relu(out)
@@ -201,9 +206,9 @@ def main(parser_data):
 
 
 
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=10e-5)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
-    weight_criterion = CE(aggregate='mean')
+    weight_criterion = CE(aggregate='sum')
 
 ########################################
     for epoch in range(n_epoch):
@@ -214,6 +219,7 @@ def main(parser_data):
         train_loss = 0.
         count = 0
         no_count = 0
+        print(" 只训练全连接，lr=0.0005，sum，1倍instance，改了人脸的检测数量范围   label2")
         print(f'-----------epoch:{epoch}---------------------')
         for image, targets in tqdm(train_data_loader, desc="train..."):
 
@@ -273,16 +279,16 @@ def main(parser_data):
                     face_imgs.append(face_img)
                     if j == 0:
                         _,stander = model1(face_img)    #tensor(1,2048)
-                if (len(face_imgs) > 1 and len(face_imgs)<10):
+                if (len(face_imgs) > 1  and len(face_imgs)<10):
                     count+=1
                     face_imgs = torch.cat(face_imgs,dim=0)
 
                     optimizer.zero_grad()
-                    bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
+                    bag_pre,instance_pre,alpha = model_cls(face_imgs,stander,bag_label)
 
-                    loss_1 = criterion(bag_pre, bag_label)
+                    loss_1 = criterion(bag_pre.unsqueeze(dim=0), bag_label)
                     loss_2 = weight_criterion(instance_pre, targets_batch, weights=alpha)
-                    loss = loss_1 + 2.0 * loss_2
+                    loss = loss_1 + loss_2
 
                     # backward pass
                     loss.backward()
@@ -378,7 +384,7 @@ def main(parser_data):
 
                     if (len(face_imgs) > 1 and len(face_imgs)<10):
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander,bag_label)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
@@ -470,7 +476,7 @@ def main(parser_data):
                     if (len(face_imgs) > 1 and len(face_imgs)<10):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander,bag_label)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
@@ -555,10 +561,10 @@ def main(parser_data):
                         if j == 0:
                             _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 1 and len(face_imgs) < 10):
+                    if (len(face_imgs) > 1 and len(face_imgs) < 11):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre, instance_pre, alpha = model_cls(face_imgs, stander)
+                        bag_pre, instance_pre, alpha = model_cls(face_imgs, stander,bag_label)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
@@ -577,8 +583,8 @@ def main(parser_data):
             print("count=", count)
             print("no-count", no_count)
 
-        # torch.save(model_cls.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}-.pth'.format(epoch, auc))
-        # torch.save(model1.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}.pth'.format(epoch, auc))
+        torch.save(model_cls.state_dict(), './outputs_my_idea/Openfor:share-label2-{}epoch-auc:{}-.pth'.format(epoch, auc))
+        torch.save(model1.state_dict(), './outputs_my_idea/Openfor:share-label2-{}epoch-auc:{}.pth'.format(epoch, auc))
 
 
 

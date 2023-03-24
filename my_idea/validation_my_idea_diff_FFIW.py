@@ -135,7 +135,9 @@ def main(parser_data):
     nn.init.xavier_uniform_(model1.net.fc.weight)
     #这里是加载在FFIW或Openfor上面迁移训练后的模型参数
 
-    cnn_sd = torch.load('FFIW：3epoch-0.8308557893871815.pth', map_location="cpu")
+    # cnn_sd = torch.load('FFIW：3epoch-0.8308557893871815.pth', map_location="cpu")
+    cnn_sd = torch.load('xception.pth', map_location="cpu")
+
     model1.load_state_dict(cnn_sd)
 
     model1.net.num_classes = 2

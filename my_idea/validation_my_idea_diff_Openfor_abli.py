@@ -159,7 +159,7 @@ def main(parser_data):
     ############resume
 
     model_cls.to(device)
-    optimizer = optim.Adam(model_cls.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=10e-5)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
 
 

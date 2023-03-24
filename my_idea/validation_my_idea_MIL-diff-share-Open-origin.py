@@ -1,8 +1,8 @@
 """
-该脚本用于调用训练好的模型权重去计算验证集/测试集的COCO指标
-以及每个类别的mAP(IoU=0.5)
+这是两个方法的结合训练，diff2是共享全连接层的
 """
-
+#!/usr/bin/env python
+# coding=utf-8
 import os
 import json
 
@@ -36,26 +36,31 @@ import torch.optim as optim
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, dim=512):
+    def __init__(self, dim=4096):
         super(AttentionLayer, self).__init__()
         self.dim = dim
-        self.linear = nn.Linear(dim, 1)
 
-    def forward(self, features, W_1, b_1, flag): #feature:(4,2048)
+    def forward(self, features,W_1, b_1, W_2,b_2,flag): #feature:(4,2048)
         if flag == 1:
-            #下面这个是共享全连接层
-            out_c = F.linear(features, W_1, b_1)
-            # out_c = self.linear(features)
+
+            out_c = F.linear(features,W_1,b_1)
+            out_c = F.relu(out_c)
+            out_c = F.linear(out_c,W_2,b_2)
+
             out = out_c - out_c.max()
             out = out.exp()
             out = out.sum(1, keepdim=True)
             alpha = out / out.sum(0)
 
+
             alpha01 = features.size(0) * alpha.expand_as(features) #alpha0:(4,2048)
+
+
             context = torch.mul(features, alpha01)
         else:
             context = features
             alpha = torch.zeros(features.size(0), 1)
+            out_c = 0
 
         return context, out_c, torch.squeeze(alpha)
 
@@ -63,31 +68,37 @@ class MIL_xcep(nn.Module):
     def __init__(self,xcep):
         super(MIL_xcep, self).__init__()
         self.xception = xcep
-        self.att_layer = AttentionLayer(2048)
-        self.linear = nn.Linear(2048, 2)
-        # params = {}
-        # for name,param in self.xception.named_parameters():
-        #     if name not in ["net.bn4.weight","net.bn4.bias",'net.conv4.conv1.weight','net.conv4.pointwise.weight']:
-        #         param.requires_grad_(False)
-        #     params[name] = param
+        self.att_layer = AttentionLayer(4096)
+        self.linear1 = nn.Linear(4096, 128)
+        self.linear2 = nn.Linear(128, 2)
 
 
+        for name,param in self.xception.named_parameters():
+            # if name not in ["fc.weight", "fc.bias", "bn4.weight", "bn4.bias", 'conv4.conv1.weight', 'conv4.pointwise.weight']:
+            param.requires_grad_(False)
 
-    def forward(self, x, flag=1):
+
+    def forward(self, x,stander,flag=1):
         _,mx = self.xception(x)
+        diff = mx - stander
+        feature = torch.cat((diff, mx), dim=1)
 
-        out, out_c, alpha = self.att_layer(mx, self.linear.weight, self.linear.bias, flag)
+        out, out_c, alpha = self.att_layer(feature,self.linear1.weight, self.linear1.bias, self.linear2.weight,self.linear2.bias,flag)
         # m = out
         out = out.mean(0, keepdim=True)
-        # out = torch.matmul(alpha,out).unsqueeze(dim=0)
 
-        y = self.linear(out)
+
+        out = self.linear1(out)
+        out = F.relu(out)
+        y = self.linear2(out)
 
         return y,out_c,alpha
 
 
-
 def main(parser_data):
+    print("-----------两个方法结合，共享全连接层Open------------------")
+
+
     device = torch.device(parser_data.device if torch.cuda.is_available() else "cpu")
     print("Using {} device training.".format(device.type))
 
@@ -104,8 +115,6 @@ def main(parser_data):
     with open(label_json_path, 'r') as f:
         category_index = json.load(f)
 
-
-
     # 注意这里的collate_fn是自定义的，因为读取的数据包括image和targets，不能直接使用默认的方法合成batch
     batch_size = parser_data.batch_size
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
@@ -115,8 +124,11 @@ def main(parser_data):
     #加载数据集
     data_root = parser_data.data_path
     train_dataset = OpenForensics(data_root, "Train", data_transform["train"])
-    val_dataset = OpenForensics(data_root,dataset='Test-Dev',transform=data_transform["val"])
-    test_dataset = OpenForensics(data_root,dataset='Test-Challenge',transform=data_transform["val"])
+    val_dataset = OpenForensics(data_root,dataset='Val',transform=data_transform["val"])
+    test_dataset = OpenForensics(data_root,dataset='Test-Dev',transform=data_transform["val"])
+    test_challenge_dataset = OpenForensics(data_root,dataset='Test-Challenge',transform=data_transform["val"])
+
+
 
     train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_size=batch_size,
@@ -136,7 +148,13 @@ def main(parser_data):
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      num_workers=nw,
-                                                     collate_fn=val_dataset.collate_fn)
+                                                     collate_fn=test_dataset.collate_fn)
+    test_challenge_dataset_loader = torch.utils.data.DataLoader(test_challenge_dataset,
+                                                      batch_size=batch_size,
+                                                      shuffle=False,
+                                                      pin_memory=True,
+                                                      num_workers=nw,
+                                                      collate_fn=test_challenge_dataset.collate_fn)
 
 
     # create model（目标检测的模型）################1111#####################
@@ -164,53 +182,41 @@ def main(parser_data):
     model1.net.fc = nn.Linear(model1.net.fc.in_features, 2)
     nn.init.xavier_uniform_(model1.net.fc.weight)
 
+    # cnn_sd = torch.load('Openfor：1epoch-0.9668582683719695.pth', map_location="cpu")
     cnn_sd = torch.load('pre_trained75.tar', map_location="cpu")["model"]
+
     model1.load_state_dict(cnn_sd)
+
     model1.net.num_classes = 2
     model1 = model1.to(device)
-    # cnn_sd = torch.load('./xception.pth', map_location="cpu")
-    # model1.load_state_dict(cnn_sd)
-    model1.eval()
 
-    # model2 = xception()
-    # #model2.load_state_dict(torch.load('xception2.pth'))
-    #
-    # model2.net.fc = nn.Linear(model2.net.fc.in_features, 2)
-    # nn.init.xavier_uniform_(model2.net.fc.weight)
-    # cnn_sd = torch.load('pre_trained75.tar', map_location="cpu")["model"]
-    # model1.load_state_dict(cnn_sd)
-    # model2.net.num_classes = 2
-    #
-    # model2.to(device)
-    # model2.eval()
     n_epoch = args.epoch
 #############################################
     model_cls = MIL_xcep(model1)
 
+    model1.eval()
     model_cls.train()
-    ############resume
-    resume = parser_data.resume
-    if resume:
-        wk = torch.load('4epoch.pth',map_location="cpu")
-        model_cls.net.load_state_dict(wk)
+
     model_cls.to(device)
 
 
 
-    optimizer = optim.Adam(model_cls.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.reg)
+    optimizer = optim.Adam(model_cls.parameters(), lr=0.0005, betas=(0.9, 0.999), weight_decay=10e-5)
     criterion = torch.nn.CrossEntropyLoss(size_average=True)
     weight_criterion = CE(aggregate='mean')
 
 ########################################
     for epoch in range(n_epoch):
+        model1.eval()
+        model_cls.train()
         output_list = []
         target_list = []
         train_loss = 0.
         count = 0
         no_count = 0
+        print(f'-----------epoch:{epoch}---------------------')
         for image, targets in tqdm(train_data_loader, desc="train..."):
-            # img=data['img'].to(device, non_blocking=True).float()
-            # target=data['label'].to(device, non_blocking=True).long()
+
             #改动
             image = list(img.to(device) for img in image)
             outputs = model(image)
@@ -258,28 +264,23 @@ def main(parser_data):
                 targets_batch = torch.tensor(targets_batch).to(device)
                 input_cls_list = []
 
-                # if len(coordinates) > 1:
-                #stander = torch.randn(2048,)
+
                 for j in range(len(coordinates)):
-                    # coordinates = coordinates.round().long()
-                    # coordinates_size = (coordinates[j][3]-coordinates[j][1],coordinates[j][2]-coordinates[j][0])
+
                     face_img = image[i][:, coordinates[j][1]:coordinates[j][3], coordinates[j][0]:coordinates[j][2]]
                     face_img = face_img.unsqueeze(dim=0)
                     face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear', align_corners=False)
                     face_imgs.append(face_img)
-                    # if j == 0:
-                    #     _,stander = model1(face_img)    #tensor(1,2048)
-                if (len(face_imgs) > 1 and len(face_imgs)<8):
+                    if j == 0:
+                        _,stander = model1(face_img)    #tensor(1,2048)
+                if (len(face_imgs) > 1 and len(face_imgs)<10):
                     count+=1
                     face_imgs = torch.cat(face_imgs,dim=0)
-                    # out_cls, loss = model_cls.train_step(face_imgs, targets_batch.long(), stander)
+
                     optimizer.zero_grad()
-                    bag_pre,instance_pre,alpha = model_cls(face_imgs)
+                    bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
 
                     loss_1 = criterion(bag_pre, bag_label)
-                    # print("---------------------------")
-                    # print(instance_pre.size())
-                    # print(targets_batch.size())
                     loss_2 = weight_criterion(instance_pre, targets_batch, weights=alpha)
                     loss = loss_1 + 2.0 * loss_2
 
@@ -300,21 +301,11 @@ def main(parser_data):
                     continue
 
 
-
-
-            # # 将每个人脸的labels放进列表
-            # for i in range(len(gt_labels_after)):
-            #     # temp_list=targets[i]['labels']
-            #     temp_list = gt_labels_after[i]
-            #     for j in range(len(temp_list)):
-            #         target_list.append(temp_list[j])
-
         target_list = [*map(lambda x: x - 1, target_list)]
         auc = roc_auc_score(target_list, output_list)
-        print(f'{epoch}--------------------------------------------')
         print("count=",count)
         print("no-count",no_count)
-        print(f'openfor | train-AUC: {auc:.4f}')
+        print(f'openfor | train-together-AUC: {auc:.4f}')
 
         #sbi
         target_list = []
@@ -376,23 +367,18 @@ def main(parser_data):
                     targets_batch = torch.tensor(targets_batch).to(device)
                     input_cls_list = []
 
-                    #if len(coordinates) > 1:
-                        # stander = torch.randn(2048,)
                     for j in range(len(coordinates)):
-                        # coordinates = coordinates.round().long()
-                        # coordinates_size = (coordinates[j][3]-coordinates[j][1],coordinates[j][2]-coordinates[j][0])
                         face_img = image[i][:, coordinates[j][1]:coordinates[j][3], coordinates[j][0]:coordinates[j][2]]
                         face_img = face_img.unsqueeze(dim=0)
                         face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
                                                                    align_corners=False)
                         face_imgs.append(face_img)
-                        # if j == 0:
-                        #     _, stander = model1(face_img)  # tensor(1,2048)
+                        if j == 0:
+                            _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 1 and len(face_imgs)<8):
-
+                    if (len(face_imgs) > 1 and len(face_imgs)<10):
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre,instance_pre,alpha = model_cls(face_imgs)
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
@@ -406,19 +392,12 @@ def main(parser_data):
                         face_imgs = []
                         continue
 
-                # # 将每个人脸的labels放进列表
-                # for i in range(len(gt_labels_after)):
-                #     # temp_list=targets[i]['labels']
-                #     temp_list = gt_labels_after[i]
-                #     for j in range(len(temp_list)):
-                #         target_list.append(temp_list[j])
 
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
-            print(f'openfor | Val-AUC: {auc:.4f}')
+            print(f'openfor | Val-together-AUC: {auc:.4f}')
             print("count=", count)
             print("no-count", no_count)
-
 
 
             target_list = []
@@ -468,7 +447,6 @@ def main(parser_data):
                     targets_batch = gt_labels_after[i].to("cpu").numpy()
 
                     if len(targets_batch) < 1:
-                        print("target-batch is null")
                         continue
 
                     bag_label = targets_batch.max() - 1
@@ -477,8 +455,7 @@ def main(parser_data):
                     targets_batch = torch.tensor(targets_batch).to(device)
                     input_cls_list = []
 
-                    #if len(coordinates) > 1:
-                        # stander = torch.randn(2048,)
+
                     for j in range(len(coordinates)):
                         # coordinates = coordinates.round().long()
                         # coordinates_size = (coordinates[j][3]-coordinates[j][1],coordinates[j][2]-coordinates[j][0])
@@ -487,13 +464,13 @@ def main(parser_data):
                         face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
                                                                    align_corners=False)
                         face_imgs.append(face_img)
-                        # if j == 0:
-                        #     _, stander = model1(face_img)  # tensor(1,2048)
+                        if j == 0:
+                            _, stander = model1(face_img)  # tensor(1,2048)
 
-                    if (len(face_imgs) > 1 and len(face_imgs)<8):
+                    if (len(face_imgs) > 1 and len(face_imgs)<10):
 
                         face_imgs = torch.cat(face_imgs, dim=0)
-                        bag_pre,instance_pre,alpha = model_cls(face_imgs)
+                        bag_pre,instance_pre,alpha = model_cls(face_imgs,stander)
                         out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
                         output_list.extend(out_cls)
                         face_imgs = []
@@ -506,21 +483,102 @@ def main(parser_data):
                         face_imgs = []
                         continue
 
-                # 将每个人脸的labels放进列表
-                # for i in range(len(gt_labels_after)):
-                #     # temp_list=targets[i]['labels']
-                #     temp_list = gt_labels_after[i]
-                #     for j in range(len(temp_list)):
-                #         target_list.append(temp_list[j])
-
             target_list = [*map(lambda x: x - 1, target_list)]
             auc = roc_auc_score(target_list, output_list)
-            print(f'openfor | Test-AUC: {auc:.4f}')
+            print(f'openfor | Test-Dev-AUC: {auc:.4f}')
             print("count=", count)
             print("no-count", no_count)
 
-        # torch.save(model_cls.state_dict(),'./outputs/{}new_epoch.pth'.format(epoch))
-        # torch.save(model1.state_dict(),'./outputs/{}new_Xception_epoch.pth'.format(epoch))
+            target_list = []
+            output_list = []
+            count = 0
+            no_count = 0
+            #####################################################################################
+            for image, targets in tqdm(test_challenge_dataset_loader, desc="test..."):
+                # 将图片传入指定设备device
+
+                image = list(img.to(device) for img in image)
+                outputs = model(image)
+                outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+
+                ########################这是将多余检测框去掉或是去掉多余的标注，方便后面计算AUC#######################################3
+                gt_boxes = [t["boxes"] for t in targets]
+                gt_labels = [t["labels"] for t in targets]
+                outputs_ = [t["boxes"] for t in outputs]
+                gt_boxes_after = []
+                gt_labels_after = []
+                outputs_after = []
+                for outputs_in_image, gt_boxes_in_image, gt_labels_in_image in zip(outputs_, gt_boxes, gt_labels):
+                    if (len(gt_labels_in_image) >= len(outputs_in_image)):
+                        match_quality_matrix = box_ops.box_iou(outputs_in_image, gt_boxes_in_image)
+                        _, indices = match_quality_matrix.max(dim=1)
+                        gt_boxes_in_image = gt_boxes_in_image[indices]
+                        gt_labels_in_image = gt_labels_in_image[indices]
+                        gt_boxes_after.append(gt_boxes_in_image)
+                        gt_labels_after.append(gt_labels_in_image)
+                        outputs_after.append(outputs_in_image)
+                    else:
+                        match_quality_matrix = box_ops.box_iou(gt_boxes_in_image, outputs_in_image)
+                        _, indices = match_quality_matrix.max(dim=1)
+                        outputs_in_image = outputs_in_image[indices]
+                        gt_boxes_after.append(gt_boxes_in_image)
+                        gt_labels_after.append(gt_labels_in_image)
+                        outputs_after.append(outputs_in_image)
+                ##########################################################################
+
+                face_imgs = []
+                # 将图片中的人脸剪裁出来，准备放入SBI模型中
+                for i in range(len(outputs_after)):
+                    # coordinates = outputs[i]['boxes']
+                    face_input = []
+                    coordinates = outputs_after[i]
+                    coordinates = coordinates.round().long()
+                    targets_batch = gt_labels_after[i].to("cpu").numpy()
+
+                    if len(targets_batch) < 1:
+                        continue
+
+                    bag_label = targets_batch.max() - 1
+                    bag_label = torch.tensor(bag_label).to(device).unsqueeze(dim=0)
+                    targets_batch = [*map(lambda x: x - 1, targets_batch)]
+                    targets_batch = torch.tensor(targets_batch).to(device)
+                    input_cls_list = []
+
+                    for j in range(len(coordinates)):
+                        # coordinates = coordinates.round().long()
+                        # coordinates_size = (coordinates[j][3]-coordinates[j][1],coordinates[j][2]-coordinates[j][0])
+                        face_img = image[i][:, coordinates[j][1]:coordinates[j][3], coordinates[j][0]:coordinates[j][2]]
+                        face_img = face_img.unsqueeze(dim=0)
+                        face_img = torch.nn.functional.interpolate(face_img, size=380, mode='bilinear',
+                                                                   align_corners=False)
+                        face_imgs.append(face_img)
+                        if j == 0:
+                            _, stander = model1(face_img)  # tensor(1,2048)
+
+                    if (len(face_imgs) > 1 and len(face_imgs) < 10):
+
+                        face_imgs = torch.cat(face_imgs, dim=0)
+                        bag_pre, instance_pre, alpha = model_cls(face_imgs, stander)
+                        out_cls = instance_pre.softmax(1)[:, 1].detach().to('cpu').numpy()
+                        output_list.extend(out_cls)
+                        face_imgs = []
+
+                        for m in range(len(targets_batch)):
+                            target_list.append(gt_labels_after[i][m])
+                        count += 1
+                    else:
+                        no_count += 1
+                        face_imgs = []
+                        continue
+
+            target_list = [*map(lambda x: x - 1, target_list)]
+            auc = roc_auc_score(target_list, output_list)
+            print(f'openfor | Test-challenge-AUC: {auc:.4f}')
+            print("count=", count)
+            print("no-count", no_count)
+
+        # torch.save(model_cls.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}-.pth'.format(epoch, auc))
+        # torch.save(model1.state_dict(), './outputs_my_idea/Openfor:share-{}epoch-auc:{}.pth'.format(epoch, auc))
 
 
 
@@ -549,11 +607,7 @@ if __name__ == "__main__":
     parser.add_argument('--label-json-path', type=str, default="./test_open.json")
 
     parser.add_argument('--epoch', type=int, default=10)
-    parser.add_argument('--resume', type=bool, default=False)
-    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR',
-                        help='learning rate (default: 0.01)')
-    parser.add_argument('--reg', type=float, default=10e-5, metavar='R',
-                        help='weight decay')
+
 
 
     args = parser.parse_args()

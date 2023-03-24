@@ -111,12 +111,14 @@ def main(parser_data):
                                                      pin_memory=True,
                                                      num_workers=nw,
                                                      collate_fn=val_dataset.collate_fn)
+
     test_dataset_loader = torch.utils.data.DataLoader(test_dataset,
                                                      batch_size=batch_size,
                                                      shuffle=False,
                                                      pin_memory=True,
                                                      num_workers=nw,
                                                      collate_fn=test_dataset.collate_fn)
+
     test_challenge_dataset_loader = torch.utils.data.DataLoader(test_Challenge_dataset,
                                                       batch_size=batch_size,
                                                       shuffle=False,
